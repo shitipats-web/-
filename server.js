@@ -1796,3 +1796,432 @@ server.listen(PORT, () => {
     `Server started at http://localhost:${PORT}`
   );
 });
+
+import sys
+from flask import Flask, request, jsonify
+from pythainlp.tag import pos_tag
+from pythainlp.tokenize import word_tokenize
+
+app = Flask(__name__)
+
+@app.route("/check-noun", methods=["POST"])
+def check_noun():
+    data = request.json or {}
+    word = data.get("word", "").strip()
+    
+    if not word:
+        return jsonify({"isNoun": False})
+    
+    # ตัดคำและวิเคราะห์ชนิดคำ (POS Tagging)
+    tokens = word_tokenize(word, engine="newmm")
+    tagged = pos_tag(tokens, engine="perceptron", corpus="orchid")
+    
+    # ถ้าเป็นคำนามหลักในภาษไทย PyThaiNLP (Orchid Corpus) จะขึ้นต้นด้วย N (เช่น NCN, NPR เป็นต้น)
+    # หรือยอมรับคำทับศัพท์/ภาษาอังกฤษเบื้องต้น
+    is_noun = True
+    for w, t in tagged:
+        # หากมีคำที่เป็นกริยา (V) วิเศษณ์ (ADV) หรือคำเชื่อมชัดเจน จะตีความว่าไม่ใช่คำนามเดี่ยว
+        if t.startswith("V") or t.startswith("AV") or t.startswith("AJ"):
+            # ข้อยกเว้นบางคำที่อาจคาบเกี่ยว ให้ยึดตามหลัก POS ถ้าขึ้นต้นด้วย N ถือว่าเป็นคำนาม
+            pass
+            
+    # ตรวจสอบว่ามีแท็กคำนาม (N...) อย่างน้อย 1 โหนดในคำที่พิมพ์มา
+    has_noun_tag = any(t.startswith("N") for w, t in tagged)
+    is_english = all(ord(c) < 128 for c in word.replace(" ", ""))
+    
+    # ถ้าเป็นภาษาอังกฤษหรือมีแท็กคำนาม ให้ผ่าน
+    valid = has_noun_tag or is_english
+
+    return jsonify({"isNoun": valid, "tags": tagged})
+
+if __name__ == "__main__":
+    app.run(host="127.0.0.1", port=5000)
+
+const express = require("express");
+const http = require("http");
+const { Server } = require("socket.io");
+const httpModule = require("http");
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
+
+const PORT = process.env.PORT || 3000;
+const PYTHON_SERVICE_PORT = 5000;
+const rooms = new Map();
+const BETWEEN_TURNS_MS = 2800;
+
+/* =========================================================
+   ฟังก์ชันเช็กคำนามผ่าน Python (PyThaiNLP)
+========================================================= */
+function checkNounWithPython(word) {
+  return new Promise((resolve) => {
+    const data = JSON.stringify({ word });
+    const options = {
+      hostname: "127.0.0.1",
+      port: PYTHON_SERVICE_PORT,
+      path: "/check-noun",
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(data)
+      }
+    };
+
+    const req = httpModule.request(options, (res) => {
+      let body = "";
+      res.on("data", (chunk) => (body += chunk));
+      res.on("end", () => {
+        try {
+          const json = JSON.parse(body);
+          resolve(Boolean(json.isNoun));
+        } catch {
+          resolve(true); // หากระบบ Python ขัดข้อง ให้ยอมรับชั่วคราวเพื่อไม่ให้เกมค้าง
+        }
+      });
+    });
+
+    req.on("error", () => {
+      resolve(true);
+    });
+
+    req.write(data);
+    req.end();
+  });
+}
+
+/* =========================================================
+   HTML + CSS + Client JavaScript (UI ทันสมัย)
+========================================================= */
+const page = String.raw`
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noun Link Arena</title>
+  <style>
+    @import url("https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600;700;900&display=swap");
+    * { box-sizing: border-box; }
+    :root {
+      --bg: #090b18;
+      --card: rgba(21, 24, 48, 0.85);
+      --primary: #8b5cf6;
+      --cyan: #22d3ee;
+      --green: #34d399;
+      --red: #fb7185;
+      --yellow: #fbbf24;
+      --white: #f8fafc;
+      --muted: #a5acc3;
+      --border: rgba(255, 255, 255, 0.12);
+    }
+    body {
+      min-height: 100vh;
+      margin: 0;
+      padding: 24px;
+      color: var(--white);
+      font-family: "Noto Sans Thai", sans-serif;
+      background: radial-gradient(circle at 15% 15%, rgba(139,92,246,0.25), transparent 35%), var(--bg);
+    }
+    .hidden { display: none !important; }
+    .app { width: min(1100px, 100%); margin: 0 auto; }
+    .brand { margin: 10px 0 25px; text-align: center; }
+    .brand h1 { margin: 0; font-size: clamp(2rem, 6vw, 3.8rem); font-weight: 900; background: linear-gradient(100deg, #fff, #c4b5fd, #67e8f9); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .brand p { color: var(--muted); margin-top: 8px; }
+    .card { padding: 24px; background: var(--card); border: 1px solid var(--border); border-radius: 24px; backdrop-filter: blur(16px); box-shadow: 0 25px 70px rgba(0,0,0,0.4); }
+    .lobby { width: min(500px, 100%); margin: 0 auto; display: grid; gap: 16px; }
+    input { width: 100%; min-height: 52px; padding: 12px 16px; color: var(--white); background: rgba(255,255,255,0.06); border: 1px solid var(--border); border-radius: 14px; outline: none; }
+    input:focus { border-color: var(--cyan); box-shadow: 0 0 0 4px rgba(34,211,238,0.15); }
+    .button { min-height: 50px; padding: 12px 20px; color: white; font-weight: 800; border: 0; border-radius: 14px; background: linear-gradient(135deg, #7c3aed, #a855f7); cursor: pointer; transition: 0.2s; }
+    .button:hover { filter: brightness(1.1); transform: translateY(-2px); }
+    .button.cyan { background: linear-gradient(135deg, #0891b2, #22d3ee); }
+    .button.green { background: linear-gradient(135deg, #059669, #34d399); }
+    .lobby-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .status { min-height: 24px; color: var(--red); font-weight: 700; text-align: center; }
+    .room-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    .room-code { font-size: 1.3rem; font-weight: 900; letter-spacing: 2px; color: var(--cyan); }
+    .game-grid { display: grid; grid-template-columns: 1fr 300px; gap: 18px; }
+    .panel { padding: 20px; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 18px; }
+    .timer { width: 110px; height: 110px; margin: 0 auto 15px; border-radius: 50%; display: grid; place-items: center; background: conic-gradient(var(--cyan) 0deg, rgba(255,255,255,0.1) 0deg); border: 6px solid var(--bg); font-size: 2.2rem; font-weight: 900; }
+    .word-stage { min-height: 120px; display: grid; place-items: center; margin-bottom: 15px; padding: 15px; background: rgba(0,0,0,0.2); border-radius: 14px; text-align: center; font-size: 2rem; font-weight: 900; }
+    .answer-form { display: grid; grid-template-columns: 1fr auto; gap: 10px; }
+    .player { display: flex; justify-content: space-between; padding: 10px; margin-bottom: 8px; background: rgba(255,255,255,0.05); border-radius: 10px; }
+    .player.current { border: 1px solid var(--cyan); background: rgba(34,211,238,0.1); }
+    .player.dead { opacity: 0.4; }
+    .popup-layer { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; pointer-events: none; padding: 20px; }
+    .popup { width: min(400px, 100%); padding: 22px; background: #12152d; border: 1px solid var(--cyan); border-radius: 20px; text-align: center; box-shadow: 0 20px 50px rgba(0,0,0,0.5); transform: scale(0.7); opacity: 0; transition: 0.3s cubic-bezier(0.18, 1.5, 0.35, 1); }
+    .popup.show { transform: scale(1); opacity: 1; }
+    .popup-title { font-size: 1.2rem; font-weight: 900; margin-bottom: 5px; }
+    .popup-word { font-size: 1.8rem; font-weight: 900; color: var(--cyan); margin-top: 8px; }
+    @media(max-width: 768px) { .game-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header class="brand">
+      <h1>NOUN LINK ARENA</h1>
+      <p>เกมเชื่อมโยงคำนามอัตโนมัติด้วย AI ภาษาไทย</p>
+    </header>
+
+    <section id="lobbyScreen" class="card lobby">
+      <h2>เข้าสู่เกม</h2>
+      <input id="nameInput" maxlength="20" placeholder="กรอกชื่อของคุณ" autocomplete="off">
+      <div class="lobby-actions">
+        <button id="createButton" class="button">สร้างห้องใหม่</button>
+        <button id="openJoinBtn" class="button cyan">เข้าร่วมห้อง</button>
+      </div>
+      <div id="joinPanel" class="hidden" style="display:grid; gap:10px;">
+        <input id="codeInput" maxlength="6" placeholder="รหัสห้อง 6 หลัก" autocomplete="off">
+        <button id="joinButton" class="button cyan">ยืนยันเข้าห้อง</button>
+      </div>
+      <div id="lobbyStatus" class="status"></div>
+    </section>
+
+    <section id="roomScreen" class="card hidden">
+      <div class="room-top">
+        <div>รหัสห้อง: <span id="roomCode" class="room-code">------</span></div>
+        <button id="startButton" class="button green hidden">เริ่มเกม</button>
+      </div>
+      <div class="game-grid">
+        <section class="panel">
+          <div id="timer" class="timer">--</div>
+          <div id="turnText" class="text-center" style="font-weight:700; margin-bottom:15px; text-align:center;">รอเริ่มเกม</div>
+          <div class="word-stage">
+            <div id="wordChain"><span style="color:var(--muted)">ยังไม่มีคำ</span></div>
+          </div>
+          <form id="answerForm" class="answer-form">
+            <input id="wordInput" maxlength="40" placeholder="พิมพ์คำนาม..." autocomplete="off" disabled>
+            <button id="submitButton" class="button" type="submit" disabled>ส่ง</button>
+          </form>
+          <div id="gameStatus" class="status"></div>
+        </section>
+        <aside class="panel">
+          <h3>ผู้เล่นในห้อง</h3>
+          <div id="playerList"></div>
+        </aside>
+      </div>
+    </section>
+  </main>
+
+  <div id="popupLayer" class="popup-layer hidden"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const $ = id => document.getElementById(id);
+    
+    $("openJoinBtn").onclick = () => $("joinPanel").classList.toggle("hidden");
+    
+    $("createButton").onclick = () => {
+      const name = $("nameInput").value.trim();
+      if(!name) return $("lobbyStatus").textContent = "กรุณากรอกชื่อ";
+      socket.emit("createRoom", { name }, res => { if(!res.ok) $("lobbyStatus").textContent = res.error; });
+    };
+
+    $("joinButton").onclick = () => {
+      const name = $("nameInput").value.trim();
+      const code = $("codeInput").value.trim().toUpperCase();
+      if(!name || code.length !== 6) return $("lobbyStatus").textContent = "กรุณากรอกชื่อและรหัส 6 หลัก";
+      socket.emit("joinRoom", { name, code }, res => { if(!res.ok) $("lobbyStatus").textContent = res.error; });
+    };
+
+    $("startButton").onclick = () => socket.emit("startGame");
+
+    $("answerForm").onsubmit = e => {
+      e.preventDefault();
+      const word = $("wordInput").value.trim();
+      if(!word) return;
+      $("wordInput").disabled = true;
+      $("submitButton").disabled = true;
+      socket.emit("submitWord", { word }, res => {
+        if(!res.ok) {
+          $("gameStatus").textContent = res.error;
+          $("wordInput").disabled = false;
+          $("submitButton").disabled = false;
+        } else {
+          $("wordInput").value = "";
+        }
+      });
+    };
+
+    socket.on("roomState", room => {
+      $("lobbyScreen").classList.add("hidden");
+      $("roomScreen").classList.remove("hidden");
+      $("roomCode").textContent = room.code;
+      $("startButton").classList.toggle("hidden", room.hostId !== socket.id || room.started);
+      
+      const isMyTurn = room.started && !room.transitioning && room.turnId === socket.id;
+      $("wordInput").disabled = !isMyTurn;
+      $("submitButton").disabled = !isMyTurn;
+      if(isMyTurn) $("wordInput").focus();
+
+      $("turnText").textContent = room.winner ? "จบเกม: " + room.winner + " ชนะ" : (room.started ? (isMyTurn ? "ตาของคุณ!" : "รอผู้เล่นอื่นตอบ...") : "รอเจ้าของห้องเริ่มเกม");
+      
+      if(room.currentWord) {
+        $("wordChain").textContent = (room.previousWord ? room.previousWord + " ➔ " : "") + room.currentWord;
+      } else {
+        $("wordChain").innerHTML = '<span style="color:var(--muted)">เริ่มต้นคำแรก</span>';
+      }
+
+      $("playerList").replaceChildren(...room.players.map(p => {
+        const div = document.createElement("div");
+        div.className = "player" + (p.id === room.turnId ? " current" : "") + (!p.alive ? " dead" : "");
+        div.innerHTML = '<span>' + p.name + '</span><span>' + p.score + ' คะแนน</span>';
+        return div;
+      }));
+    });
+
+    socket.on("popup", data => {
+      const layer = $("popupLayer");
+      layer.classList.remove("hidden");
+      layer.innerHTML = '<div class="popup show"><div class="popup-title">' + data.title + '</div><div>' + data.message + '</div>' + (data.word ? '<div class="popup-word">' + data.word + '</div>' : '') + '</div>';
+      setTimeout(() => layer.classList.add("hidden"), data.duration || 2200);
+    });
+  </script>
+</body>
+</html>
+`;
+
+app.get("/", (req, res) => res.send(page));
+
+/* =========================================================
+   ระบบจัดการห้องและเกมฝั่ง Server
+========================================================= */
+function makeCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
+  do {
+    code = Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+  } while (rooms.has(code));
+  return code;
+}
+
+io.on("connection", socket => {
+  socket.on("createRoom", ({ name }, cb) => {
+    const code = makeCode();
+    const room = {
+      code, hostId: socket.id, players: [{ id: socket.id, name, alive: true, connected: true, score: 0 }],
+      usedWords: new Set(), currentWord: "", previousWord: "", currentIndex: 0, started: false, transitioning: false, timer: null
+    };
+    rooms.set(code, room);
+    socket.join(code);
+    socket.data.roomCode = code;
+    io.to(code).emit("roomState", room);
+    cb({ ok: true, code });
+  });
+
+  socket.on("joinRoom", ({ name, code }, cb) => {
+    const room = rooms.get(code);
+    if (!room || room.started) return cb({ ok: false, error: "ห้องไม่ถูกต้องหรือเริ่มเกมแล้ว" });
+    room.players.push({ id: socket.id, name, alive: true, connected: true, score: 0 });
+    socket.join(code);
+    socket.data.roomCode = code;
+    io.to(code).emit("roomState", room);
+    io.to(code).emit("popup", { title: "ผู้เล่นใหม่", message: name + " เข้าร่วมห้อง", duration: 2000 });
+    cb({ ok: true });
+  });
+
+  socket.on("startGame", () => {
+    const room = rooms.get(socket.data.roomCode);
+    if (!room || room.hostId !== socket.id || room.started) return;
+    room.started = true;
+    room.players.forEach(p => { p.alive = true; p.score = 0; });
+    room.usedWords.clear();
+    room.currentWord = "";
+    room.currentIndex = 0;
+    io.to(room.code).emit("roomState", room);
+    io.to(room.code).emit("popup", { title: "เริ่มเกม!", message: "เตรียมตัวเชื่อมคำนาม", duration: 2500 });
+    startTurn(room, 0);
+  });
+
+  socket.on("submitWord", async ({ word }, cb) => {
+    const room = rooms.get(socket.data.roomCode);
+    if (!room?.started || room.transitioning) return cb({ ok: false, error: "ยังไม่ถึงเวลา" });
+    const player = room.players[room.currentIndex];
+    if (player?.id !== socket.id) return cb({ ok: false, error: "ไม่ใช่ตาของคุณ" });
+
+    const cleanWord = word.trim().toLowerCase();
+    if (room.usedWords.has(cleanWord)) {
+      player.alive = false;
+      io.to(room.code).emit("popup", { title: "ใช้คำซ้ำ!", message: player.name + " ตกรอบ", word: cleanWord, duration: 3000 });
+      checkWinCondition(room);
+      return cb({ ok: false, error: "คำนี้ถูกใช้ไปแล้ว ตกรอบ!" });
+    }
+
+    // ตรวจสอบว่าเป็นคำนามอัตโนมัติผ่าน Python PyThaiNLP
+    const isNoun = await checkNounWithPython(cleanWord);
+    if (!isNoun) {
+      return cb({ ok: false, error: "ไม่ใช่คำนาม! กรุณากรอกใหม่" });
+    }
+
+    clearTimeout(room.timer);
+    room.usedWords.add(cleanWord);
+    room.previousWord = room.currentWord;
+    room.currentWord = cleanWord;
+    player.score += 1;
+
+    cb({ ok: true });
+    io.to(room.code).emit("popup", { title: player.name + " ตอบว่า", message: "เชื่อมคำสำเร็จ", word: cleanWord, duration: 2000 });
+    
+    room.transitioning = true;
+    io.to(room.code).emit("roomState", room);
+
+    setTimeout(() => {
+      room.transitioning = false;
+      const nextIdx = getNextPlayer(room, room.currentIndex);
+      if (nextIdx !== -1) startTurn(room, nextIdx);
+    }, BETWEEN_TURNS_MS);
+  });
+
+  socket.on("disconnect", () => {
+    const room = rooms.get(socket.data.roomCode);
+    if (!room) return;
+    const p = room.players.find(x => x.id === socket.id);
+    if (p) p.connected = false;
+    if (room.hostId === socket.id) {
+      const active = room.players.find(x => x.connected);
+      room.hostId = active ? active.id : null;
+    }
+    io.to(room.code).emit("roomState", room);
+  });
+});
+
+function startTurn(room, index) {
+  room.currentIndex = index;
+  const seconds = room.players.filter(p => p.alive && p.connected).length <= 3 ? 10 : 20;
+  room.deadline = Date.now() + seconds * 1000;
+  io.to(room.code).emit("roomState", room);
+
+  clearTimeout(room.timer);
+  room.timer = setTimeout(() => {
+    const p = room.players[room.currentIndex];
+    if (p && p.alive) {
+      p.alive = false;
+      io.to(room.code).emit("popup", { title: "หมดเวลา!", message: p.name + " ตกรอบ", duration: 3000 });
+      checkWinCondition(room);
+    }
+  }, seconds * 1000);
+}
+
+function getNextPlayer(room, cur) {
+  for (let i = 1; i <= room.players.length; i++) {
+    const idx = (cur + i) % room.players.length;
+    if (room.players[idx].alive && room.players[idx].connected) return idx;
+  }
+  return -1;
+}
+
+function checkWinCondition(room) {
+  const alive = room.players.filter(p => p.alive && p.connected);
+  if (alive.length <= 1) {
+    room.started = false;
+    const winner = alive[0] ? alive[0].name : "ไม่มีผู้ชนะ";
+    io.to(room.code).emit("popup", { title: "จบเกม!", message: "ผู้ชนะคือ " + winner, duration: 5000 });
+    io.to(room.code).emit("roomState", room);
+  } else {
+    const nextIdx = getNextPlayer(room, room.currentIndex);
+    if (nextIdx !== -1) startTurn(room, nextIdx);
+  }
+}
+
+server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
