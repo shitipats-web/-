@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>เกมคำเชื่อมออนไลน์</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 20px;
+      font-family: Arial, "Noto Sans Thai", sans-serif;
+      color: #172033;
+      background: linear-gradient(135deg, #dbeafe, #f3e8ff);
+    }
+
+    .container {
+      width: min(850px, 100%);
+      margin: auto;
+    }
+
+    .card {
+      padding: 22px;
+      margin-bottom: 16px;
+      background: rgba(255, 255, 255, 0.96);
+      border-radius: 20px;
+      box-shadow: 0 14px 35px rgba(30, 41, 59, 0.13);
+    }
+
+    h1, h2, p {
+      margin-top: 0;
+    }
+
+    h1 {
+      margin-bottom: 8px;
+      color: #6d28d9;
+      text-align: center;
+    }
+
+    .description {
+      color: #64748b;
+      line-height: 1.6;
+      text-align: center;
+    }
+
+    input, button {
+      width: 100%;
+      min-height: 50px;
+      padding: 12px 14px;
+      margin-top: 10px;
+      font: inherit;
+      border-radius: 12px;
+    }
+
+    input {
+      color: #172033;
+      background: white;
+      border: 2px solid #dbe2ea;
+      outline: none;
+    }
+
+    input:focus {
+      border-color: #7c3aed;
+    }
+
+    button {
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+      border: none;
+      background: #7c3aed;
+    }
+
+    button.secondary {
+      background: #2563eb;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    .room-header {
+      text-align: center;
+    }
+
+    .room-code {
+      margin: 6px 0;
+      color: #7c3aed;
+      font-size: 32px;
+      font-weight: 900;
+      letter-spacing: 5px;
+    }
+
+    .current-word {
+      min-height: 100px;
+      display: grid;
+      place-items: center;
+      margin: 16px 0;
+      padding: 15px;
+      color: white;
+      font-size: clamp(28px, 7vw, 52px);
+      font-weight: 900;
+      text-align: center;
+      word-break: break-word;
+      border-radius: 18px;
+      background: linear-gradient(135deg, #7c3aed, #2563eb);
+    }
+
+    .turn-text {
+      color: #475569;
+      font-size: 20px;
+      font-weight: bold;
+      text-align: center;
+    }
+
+    .time-text {
+      color: #0f172a;
+      font-size: 32px;
+      font-weight: 900;
+      text-align: center;
+    }
+
+    .timer {
+      height: 18px;
+      overflow: hidden;
+      margin: 12px 0;
+      background: #e2e8f0;
+      border-radius: 999px;
+    }
+
+    .timer-bar {
+      width: 0%;
+      height: 100%;
+      background: #22c55e;
+      transition: width 0.1s linear;
+    }
+
+    .timer-bar.danger {
+      background: #ef4444;
+    }
+
+    .players {
+      display: grid;
+      gap: 8px;
+      padding: 0;
+      list-style: none;
+    }
+
+    .player {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 12px;
+      border: 2px solid #e2e8f0;
+      border-radius: 12px;
+    }
+
+    .player.active {
+      border-color: #22c55e;
+      background: #dcfce7;
+    }
+
+    .player.out {
+      opacity: 0.45;
+      text-decoration: line-through;
+    }
+
+    .message {
+      min-height: 25px;
+      margin-top: 12px;
+      color: #6d28d9;
+      font-weight: bold;
+      text-align: center;
+    }
+
+    .message.error {
+      color: #dc2626;
+    }
+
+    .used-words {
+      max-height: 160px;
+      overflow: auto;
+      color: #475569;
+      line-height: 1.8;
+      word-break: break-word;
+    }
+
+    .rules {
+      color: #475569;
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    @media (max-width: 620px) {
+      body {
+        padding: 10px;
+      }
+
+      .card {
+        padding: 17px;
+      }
+
+      .row {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <main class="container">
+    <section id="joinScreen" class="card">
+      <h1>เกมคำเชื่อมออนไลน์</h1>
+      <p class="description">
+        สร้างห้อง ส่งรหัสให้เพื่อน แล้วเล่นพร้อมกันแบบเรียลไทม์
+      </p>
+
+      <input
+        id="nameInput"
+        maxlength="20"
+        placeholder="ชื่อของคุณ"
+        autocomplete="off"
+      >
+
+      <input
+        id="roomInput"
+        maxlength="6"
+        placeholder="รหัสห้อง เช่น ABC123"
+        autocomplete="off"
+      >
+
+      <div class="row">
+        <button id="createButton">สร้างห้อง</button>
+        <button id="joinButton" class="secondary">เข้าร่วมห้อง</button>
+      </div>
+
+      <div id="joinMessage" class="message"></div>
+
+      <div class="rules">
+        <strong>กติกา</strong><br>
+        คำใหม่ต้องขึ้นต้นด้วยพยัญชนะตัวสุดท้ายของคำก่อนหน้า<br>
+        ห้ามใช้คำเดิมซ้ำ<br>
+        เมื่อมีผู้เล่นมากกว่า 3 คน ให้เวลา 10 วินาที<br>
+        เมื่อเหลือไม่เกิน 3 คน ให้เวลา 5 วินาที
+      </div>
+    </section>
+
+    <section id="gameScreen" class="hidden">
+      <div class="card room-header">
+        <p>รหัสห้อง</p>
+        <div id="roomCode" class="room-code">------</div>
+        <p id="statusText">กำลังรอผู้เล่น</p>
+        <button id="startButton" class="hidden">เริ่มเกม</button>
+      </div>
+
+      <div class="card">
+        <div id="turnText" class="turn-text">รอเริ่มเกม</div>
+
+        <div id="currentWord" class="current-word">
+          เริ่มด้วยคำใดก็ได้
+        </div>
+
+        <div class="time-text">
+          <span id="timeText">0.0</span> วินาที
+        </div>
+
+        <div class="timer">
+          <div id="timerBar" class="timer-bar"></div>
+        </div>
+
+        <input
+          id="wordInput"
+          placeholder="พิมพ์คำตอบ"
+          autocomplete="off"
+          disabled
+        >
+
+        <button id="submitButton" disabled>ส่งคำตอบ</button>
+        <div id="gameMessage" class="message"></div>
+      </div>
+
+      <div class="row">
+        <section class="card">
+          <h2>ผู้เล่น</h2>
+          <ul id="playerList" class="players"></ul>
+        </section>
+
+        <section class="card">
+          <h2>คำที่ใช้แล้ว</h2>
+          <div id="usedWords" class="used-words">ยังไม่มีคำ</div>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+
+    const joinScreen = document.querySelector("#joinScreen");
+    const gameScreen = document.querySelector("#gameScreen");
+    const nameInput = document.querySelector("#nameInput");
+    const roomInput = document.querySelector("#roomInput");
+    const createButton = document.querySelector("#createButton");
+    const joinButton = document.querySelector("#joinButton");
+    const joinMessage = document.querySelector("#joinMessage");
+    const roomCode = document.querySelector("#roomCode");
+    const statusText = document.querySelector("#statusText");
+    const startButton = document.querySelector("#startButton");
+    const turnText = document.querySelector("#turnText");
+    const currentWord = document.querySelector("#currentWord");
+    const timeText = document.querySelector("#timeText");
+    const timerBar = document.querySelector("#timerBar");
+    const wordInput = document.querySelector("#wordInput");
+    const submitButton = document.querySelector("#submitButton");
+    const gameMessage = document.querySelector("#gameMessage");
+    const playerList = document.querySelector("#playerList");
+    const usedWords = document.querySelector("#usedWords");
+
+    let state = null;
+
+    function showJoinError(message) {
+      joinMessage.textContent = message;
+      joinMessage.classList.add("error");
+    }
+
+    function enterRoom() {
+      joinMessage.textContent = "";
+      joinScreen.classList.add("hidden");
+      gameScreen.classList.remove("hidden");
+    }
+
+    createButton.addEventListener("click", () => {
+      const name = nameInput.value.trim();
+
+      socket.emit("createRoom", { name }, (result) => {
+        if (!result || !result.ok) {
+          showJoinError(result?.error || "สร้างห้องไม่สำเร็จ");
+          return;
+        }
+
+        enterRoom();
+      });
+    });
+
+    joinButton.addEventListener("click", () => {
+      const name = nameInput.value.trim();
+      const code = roomInput.value.trim().toUpperCase();
+
+      socket.emit("joinRoom", { name, code }, (result) => {
+        if (!result || !result.ok) {
+          showJoinError(result?.error || "เข้าห้องไม่สำเร็จ");
+          return;
+        }
+
+        enterRoom();
+      });
+    });
+
+    roomInput.addEventListener("input", () => {
+      roomInput.value = roomInput.value.toUpperCase();
+    });
+
+    startButton.addEventListener("click", () => {
+      socket.emit("startGame", (result) => {
+        if (!result || !result.ok) {
+          gameMessage.textContent =
+            result?.error || "เริ่มเกมไม่สำเร็จ";
+          gameMessage.classList.add("error");
+        }
+      });
+    });
+
+    function submitWord() {
+      const word = wordInput.value.trim();
+
+      if (!word) return;
+
+      socket.emit("submitWord", { word }, (result) => {
+        if (!result || !result.ok) {
+          gameMessage.textContent =
+            result?.error || "ส่งคำไม่สำเร็จ";
+          gameMessage.classList.add("error");
+          wordInput.focus();
+          return;
+        }
+
+        gameMessage.textContent = "";
+        gameMessage.classList.remove("error");
+        wordInput.value = "";
+      });
+    }
+
+    submitButton.addEventListener("click", submitWord);
+
+    wordInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        submitWord();
+      }
+    });
+
+    socket.on("notice", (message) => {
+      gameMessage.textContent = message;
+      gameMessage.classList.remove("error");
+    });
+
+    socket.on("roomState", (newState) => {
+      state = newState;
+      render();
+    });
+
+    socket.on("connect_error", () => {
+      gameMessage.textContent = "เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ";
+      gameMessage.classList.add("error");
+    });
+
+    function render() {
+      if (!state) return;
+
+      roomCode.textContent = state.code;
+
+      const alive = state.players.filter(
+        (player) => player.alive
+      );
+
+      const isHost = state.hostId === socket.id;
+      const isMyTurn =
+        state.started && state.turnId === socket.id;
+
+      if (state.winner) {
+        statusText.textContent = `ผู้ชนะคือ ${state.winner}`;
+      } else if (state.started) {
+        statusText.textContent =
+          `เหลือ ${alive.length} คน • คนละ ${state.turnSeconds} วินาที`;
+      } else {
+        statusText.textContent =
+          `กำลังรอผู้เล่น (${state.players.length} คน)`;
+      }
+
+      startButton.classList.toggle(
+        "hidden",
+        !isHost || state.started
+      );
+
+      startButton.textContent = state.winner
+        ? "เล่นอีกครั้ง"
+        : "เริ่มเกม";
+
+      startButton.disabled = state.players.length < 2;
+
+      currentWord.textContent =
+        state.currentWord || "เริ่มด้วยคำใดก็ได้";
+
+      const currentPlayer = state.players.find(
+        (player) => player.id === state.turnId
+      );
+
+      if (state.started) {
+        turnText.textContent = isMyTurn
+          ? "ถึงตาของคุณแล้ว"
+          : `ตาของ ${currentPlayer?.name || "-"}`;
+      } else if (state.winner) {
+        turnText.textContent = `จบเกมแล้ว`;
+      } else {
+        turnText.textContent = isHost
+          ? "เมื่อผู้เล่นพร้อมแล้ว กดเริ่มเกม"
+          : "รอเจ้าของห้องเริ่มเกม";
+      }
+
+      wordInput.disabled = !isMyTurn;
+      submitButton.disabled = !isMyTurn;
+
+      if (isMyTurn) {
+        setTimeout(() => wordInput.focus(), 100);
+      }
+
+      playerList.replaceChildren();
+
+      state.players.forEach((player) => {
+        const item = document.createElement("li");
+        const playerName = document.createElement("span");
+        const score = document.createElement("strong");
+
+        item.className = "player";
+
+        if (player.id === state.turnId) {
+          item.classList.add("active");
+        }
+
+        if (!player.alive) {
+          item.classList.add("out");
+        }
+
+        let suffix = "";
+
+        if (player.id === socket.id) {
+          suffix += " (คุณ)";
+        }
+
+        if (player.id === state.hostId) {
+          suffix += " [เจ้าของห้อง]";
+        }
+
+        playerName.textContent = player.name + suffix;
+        score.textContent = player.alive
+          ? `${player.score} คะแนน`
+          : "คัดออก";
+
+        item.append(playerName, score);
+        playerList.appendChild(item);
+      });
+
+      usedWords.textContent = state.usedWords.length
+        ? state.usedWords.join(" • ")
+        : "ยังไม่มีคำ";
+    }
+
+    setInterval(() => {
+      if (!state?.started || !state.deadline) {
+        timeText.textContent = "0.0";
+        timerBar.style.width = "0%";
+        timerBar.classList.remove("danger");
+        return;
+      }
+
+      const remaining = Math.max(
+        0,
+        state.deadline - Date.now()
+      );
+
+      const total = state.turnSeconds * 1000;
+      const percentage = Math.min(
+        100,
+        (remaining / total) * 100
+      );
+
+      timeText.textContent = (remaining / 1000).toFixed(1);
+      timerBar.style.width = `${percentage}%`;
+      timerBar.classList.toggle("danger", remaining <= 3000);
+    }, 100);
+  </script>
+</body>
+</html>
